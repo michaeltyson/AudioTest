@@ -149,7 +149,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 
 static OSStatus audioUnitRenderCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData) {
     
-    AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
+    __unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
     
     // Draw from the system audio input
     checkResult(AudioUnitRender(THIS->_audioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData), "AudioUnitRender");
