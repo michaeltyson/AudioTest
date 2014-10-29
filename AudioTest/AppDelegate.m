@@ -37,10 +37,18 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     [self teardownAudioSystem];
 }
 
+-(void)applicationDidBecomeActive:(UIApplication *)application {
+    [self updateAudioUnitStatus];
+}
+
+-(void)applicationDidEnterBackground:(UIApplication *)application {
+    [self updateAudioUnitStatus];
+}
+
 - (void)setupAudioSystem {
     
     NSError *error = nil;
-    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
+    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
         NSLog(@"Couldn't set audio session category: %@", error);
     }
     
@@ -59,17 +67,10 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     
     AudioComponent inputComponent = AudioComponentFindNext(NULL, &desc);
     checkResult(AudioComponentInstanceNew(inputComponent, &_audioUnit), "AudioComponentInstanceNew");
-    
-    // Enable input
-    UInt32 enableFlag = 1;
-    checkResult(AudioUnitSetProperty(_audioUnit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enableFlag, sizeof(enableFlag)),
-                "kAudioOutputUnitProperty_EnableIO");
-    
+
     // Set the stream formats
     AudioStreamBasicDescription clientFormat = [AppDelegate nonInterleavedFloatStereoAudioDescription];
     checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &clientFormat, sizeof(clientFormat)),
-                "kAudioUnitProperty_StreamFormat");
-    checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &clientFormat, sizeof(clientFormat)),
                 "kAudioUnitProperty_StreamFormat");
     
     // Set the render callback
@@ -99,6 +100,17 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
             }
         }
     }];
+    
+    // Watch for IAA connections
+    checkResult(AudioUnitAddPropertyListener(_audioUnit, kAudioUnitProperty_IsInterAppConnected, audioUnitPropertyChange, (__bridge void*)self), "AudioUnitAddPropertyListener");
+    
+    // Publish audio unit
+    AudioComponentDescription remoteDesc = {
+        .componentType = kAudioUnitType_RemoteGenerator,
+        .componentManufacturer = 'atpx',
+        .componentSubType = 'test'
+    };
+    checkResult(AudioOutputUnitPublish(&remoteDesc, (CFStringRef)@"AudioTest", 1, _audioUnit), "AudioOutputUnitPublish");
 }
 
 - (void)teardownAudioSystem {
@@ -133,6 +145,73 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     return YES;
 }
 
+static void audioUnitPropertyChange(void *inRefCon, AudioUnit inUnit, AudioUnitPropertyID inID, AudioUnitScope inScope, AudioUnitElement inElement) {
+	__unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
+    
+    UInt32 interAppAudioConnected = NO;
+    UInt32 size = sizeof(interAppAudioConnected);
+    OSStatus result = AudioUnitGetProperty(THIS->_audioUnit, kAudioUnitProperty_IsInterAppConnected, kAudioUnitScope_Global, 0, &interAppAudioConnected, &size);
+    if ( !checkResult(result, "AudioUnitGetProperty") ) {
+        interAppAudioConnected = NO;
+    }
+    
+    if ( interAppAudioConnected ) {
+        NSLog(@"IAA connected");
+    } else {
+        NSLog(@"IAA disconnected");
+    }
+    
+    [THIS updateAudioUnitStatus];
+}
+
+- (void)updateAudioUnitStatus {
+    UInt32 unitConnected;
+    UInt32 size = sizeof(unitConnected);
+    if ( !checkResult(AudioUnitGetProperty(_audioUnit, kAudioUnitProperty_IsInterAppConnected, kAudioUnitScope_Global, 0, &unitConnected, &size), "AudioUnitGetProperty") ) {
+        return;
+    }
+    
+    UInt32 unitRunning;
+    size = sizeof(unitRunning);
+    if ( !checkResult(AudioUnitGetProperty(_audioUnit, kAudioOutputUnitProperty_IsRunning, kAudioUnitScope_Global, 0, &unitRunning, &size), "AudioUnitGetProperty") ) {
+        return;
+    }
+    
+    BOOL foreground = [[UIApplication sharedApplication] applicationState] == UIApplicationStateActive;
+    
+    BOOL unitShouldBeRunning = unitConnected || foreground;
+    
+    if ( unitShouldBeRunning ) {
+        NSError *error = nil;
+        if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
+            NSLog(@"Couldn't set audio session category: %@", error);
+            return;
+        }
+        
+        if ( ![[AVAudioSession sharedInstance] setActive:YES error:&error] ) {
+            NSLog(@"Couldn't set audio session active: %@", error);
+            return;
+        }
+    }
+    
+    if ( unitShouldBeRunning ) {
+        if ( !unitRunning ) {
+            NSLog(@"Starting unit");
+            checkResult(AudioOutputUnitStart(_audioUnit), "AudioOutputUnitStart");
+        }
+    } else {
+        if ( unitRunning ) {
+            NSLog(@"Stopping unit");
+            checkResult(AudioOutputUnitStop(_audioUnit), "AudioOutputUnitStop");
+        }
+        NSError *error = nil;
+        if ( ![[AVAudioSession sharedInstance] setActive:NO error:&error] ) {
+            NSLog(@"Couldn't set audio session inactive: %@", error);
+            return;
+        }
+    }
+}
+
 + (AudioStreamBasicDescription)nonInterleavedFloatStereoAudioDescription {
     AudioStreamBasicDescription audioDescription;
     memset(&audioDescription, 0, sizeof(audioDescription));
@@ -149,10 +228,18 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 
 static OSStatus audioUnitRenderCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData) {
     
-    __unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
-    
-    // Draw from the system audio input
-    checkResult(AudioUnitRender(THIS->_audioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData), "AudioUnitRender");
+    // Quick sin-esque oscillator
+    const float oscillatorFrequency = 400.0;
+    static float oscillatorPosition = 0.0;
+    float oscillatorRate = oscillatorFrequency / 44100.0;
+    for ( int i=0; i<inNumberFrames; i++ ) {
+        float x = oscillatorPosition;
+        x *= x; x -= 1.0; x *= x; x -= 0.5; x *= 0.4;
+        oscillatorPosition += oscillatorRate;
+        if ( oscillatorPosition > 1.0 ) oscillatorPosition -= 2.0;
+        ((float*)ioData->mBuffers[0].mData)[i] = x;
+        ((float*)ioData->mBuffers[1].mData)[i] = x;
+    }
     
     return noErr;
 }
