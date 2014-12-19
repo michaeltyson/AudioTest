@@ -21,6 +21,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 
 @interface AppDelegate () {
     AudioUnit _audioUnit;
+    AudioUnit _iaaNodeUnit;
 }
 @property (nonatomic, strong) id observerToken;
 @end
@@ -40,7 +41,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 - (void)setupAudioSystem {
     
     NSError *error = nil;
-    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
+    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
         NSLog(@"Couldn't set audio session category: %@", error);
     }
     
@@ -63,17 +64,10 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     
     AudioComponent inputComponent = AudioComponentFindNext(NULL, &desc);
     checkResult(AudioComponentInstanceNew(inputComponent, &_audioUnit), "AudioComponentInstanceNew");
-    
-    // Enable input
-    UInt32 enableFlag = 1;
-    checkResult(AudioUnitSetProperty(_audioUnit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enableFlag, sizeof(enableFlag)),
-                "kAudioOutputUnitProperty_EnableIO");
-    
+
     // Set the stream formats
     AudioStreamBasicDescription clientFormat = [AppDelegate nonInterleavedFloatStereoAudioDescription];
     checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &clientFormat, sizeof(clientFormat)),
-                "kAudioUnitProperty_StreamFormat");
-    checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &clientFormat, sizeof(clientFormat)),
                 "kAudioUnitProperty_StreamFormat");
     
     // Set the render callback
@@ -103,12 +97,43 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
             }
         }
     }];
+    
+    // Host audio unit
+    AudioComponentDescription remoteDesc = {
+        .componentType = kAudioUnitType_RemoteGenerator,
+        .componentManufacturer = 'atpx',
+        .componentSubType = 'test'
+    };
+    
+    AudioComponent iaaComponent = AudioComponentFindNext(NULL, &remoteDesc);
+    if ( !iaaComponent ) {
+        NSLog(@"IAA node not found");
+        return;
+    }
+    
+    checkResult(AudioComponentInstanceNew(iaaComponent, &_iaaNodeUnit), "AudioComponentInstanceNew");
+    
+    checkResult(AudioUnitAddPropertyListener(_iaaNodeUnit, kAudioUnitProperty_IsInterAppConnected, audioUnitPropertyChange, (__bridge void*)self),
+                "AudioUnitAddPropertyListener");
+    
+    checkResult(AudioUnitSetProperty(_iaaNodeUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &clientFormat, sizeof(clientFormat)),
+                "AudioUnitSetProperty(kAudioUnitProperty_StreamFormat)");
+    
+    checkResult(AudioUnitSetProperty(_iaaNodeUnit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &framesPerSlice, sizeof(framesPerSlice)),
+                "AudioUnitSetProperty(kAudioUnitProperty_MaximumFramesPerSlice");
+    
+    checkResult(AudioUnitInitialize(_iaaNodeUnit), "AudioUnitInitialize");
 }
 
 - (void)teardownAudioSystem {
     if ( _audioUnit ) {
         checkResult(AudioComponentInstanceDispose(_audioUnit), "AudioComponentInstanceDispose");
         _audioUnit = NULL;
+    }
+    
+    if ( _iaaNodeUnit ) {
+        checkResult(AudioUnitUninitialize(_iaaNodeUnit), "AudioUnitUninitialize");
+        checkResult(AudioComponentInstanceDispose(_iaaNodeUnit), "AudioComponentInstanceDispose");
     }
     
     if ( _observerToken ) {
@@ -137,6 +162,24 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     return YES;
 }
 
+static void audioUnitPropertyChange(void *inRefCon, AudioUnit inUnit, AudioUnitPropertyID inID, AudioUnitScope inScope, AudioUnitElement inElement) {
+	__unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
+    
+    UInt32 interAppAudioConnected = NO;
+    UInt32 size = sizeof(interAppAudioConnected);
+    OSStatus result = AudioUnitGetProperty(THIS->_iaaNodeUnit, kAudioUnitProperty_IsInterAppConnected, kAudioUnitScope_Global, 0, &interAppAudioConnected, &size);
+    if ( !checkResult(result, "AudioUnitGetProperty") ) {
+        interAppAudioConnected = NO;
+    }
+    
+    if ( interAppAudioConnected ) {
+        NSLog(@"IAA connected");
+    } else {
+        NSLog(@"IAA disconnected");
+    }
+}
+
+
 + (AudioStreamBasicDescription)nonInterleavedFloatStereoAudioDescription {
     AudioStreamBasicDescription audioDescription;
     memset(&audioDescription, 0, sizeof(audioDescription));
@@ -155,8 +198,10 @@ static OSStatus audioUnitRenderCallback(void *inRefCon, AudioUnitRenderActionFla
     
     __unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
     
-    // Draw from the system audio input
-    checkResult(AudioUnitRender(THIS->_audioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData), "AudioUnitRender");
+    if ( THIS->_iaaNodeUnit ) {
+        // Draw from the system audio input
+        checkResult(AudioUnitRender(THIS->_iaaNodeUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData), "AudioUnitRender");
+    }
     
     return noErr;
 }
