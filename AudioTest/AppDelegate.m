@@ -52,6 +52,10 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
         NSLog(@"Couldn't set audio session category: %@", error);
     }
     
+    if ( ![[AVAudioSession sharedInstance] setPreferredIOBufferDuration:(128.0/44100.0) error:&error] ) {
+        NSLog(@"Couldn't set preferred buffer duration: %@", error);
+    }
+    
     if ( ![[AVAudioSession sharedInstance] setActive:YES error:&error] ) {
         NSLog(@"Couldn't set audio session active: %@", error);
     }
