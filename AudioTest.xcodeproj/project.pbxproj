@@ -119,9 +119,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		4C5D902E18176021000BED1C /* AudioTest */ = {
+		4C5D902E18176021000BED1C /* AudioTestNode */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 4C5D906418176022000BED1C /* Build configuration list for PBXNativeTarget "AudioTest" */;
+			buildConfigurationList = 4C5D906418176022000BED1C /* Build configuration list for PBXNativeTarget "AudioTestNode" */;
 			buildPhases = (
 				4C5D902B18176021000BED1C /* Sources */,
 				4C5D902C18176021000BED1C /* Frameworks */,
@@ -131,7 +131,7 @@
 			);
 			dependencies = (
 			);
-			name = AudioTest;
+			name = AudioTestNode;
 			productName = AudioTest;
 			productReference = 4C5D902F18176021000BED1C /* AudioTest.app */;
 			productType = "com.apple.product-type.application";
@@ -171,7 +171,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				4C5D902E18176021000BED1C /* AudioTest */,
+				4C5D902E18176021000BED1C /* AudioTestNode */,
 			);
 		};
 /* End PBXProject section */
@@ -349,7 +349,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		4C5D906418176022000BED1C /* Build configuration list for PBXNativeTarget "AudioTest" */ = {
+		4C5D906418176022000BED1C /* Build configuration list for PBXNativeTarget "AudioTestNode" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				4C5D906518176022000BED1C /* Debug */,
