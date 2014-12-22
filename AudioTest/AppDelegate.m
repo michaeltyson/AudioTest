@@ -199,7 +199,7 @@ static OSStatus audioUnitRenderCallback(void *inRefCon, AudioUnitRenderActionFla
     __unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
     
     if ( THIS->_iaaNodeUnit ) {
-        // Draw from the system audio input
+        // Draw from the IAA node
         checkResult(AudioUnitRender(THIS->_iaaNodeUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData), "AudioUnitRender");
     }
     
