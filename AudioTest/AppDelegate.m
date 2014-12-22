@@ -40,7 +40,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 - (void)setupAudioSystem {
     
     NSError *error = nil;
-    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
+    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
         NSLog(@"Couldn't set audio session category: %@", error);
     }
     
@@ -64,16 +64,9 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     AudioComponent inputComponent = AudioComponentFindNext(NULL, &desc);
     checkResult(AudioComponentInstanceNew(inputComponent, &_audioUnit), "AudioComponentInstanceNew");
     
-    // Enable input
-    UInt32 enableFlag = 1;
-    checkResult(AudioUnitSetProperty(_audioUnit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enableFlag, sizeof(enableFlag)),
-                "kAudioOutputUnitProperty_EnableIO");
-    
     // Set the stream formats
     AudioStreamBasicDescription clientFormat = [AppDelegate nonInterleavedFloatStereoAudioDescription];
     checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &clientFormat, sizeof(clientFormat)),
-                "kAudioUnitProperty_StreamFormat");
-    checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &clientFormat, sizeof(clientFormat)),
                 "kAudioUnitProperty_StreamFormat");
     
     // Set the render callback
@@ -153,10 +146,17 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 
 static OSStatus audioUnitRenderCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData) {
     
-    __unsafe_unretained AppDelegate *THIS = (__bridge AppDelegate*)inRefCon;
-    
-    // Draw from the system audio input
-    checkResult(AudioUnitRender(THIS->_audioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData), "AudioUnitRender");
+    const float oscillatorFrequency = 400.0;
+    static float oscillatorPosition = 0.0;
+    float oscillatorRate = oscillatorFrequency / 44100.0;
+    for ( int i=0; i<inNumberFrames; i++ ) {
+        float x = oscillatorPosition;
+        x *= x; x -= 1.0; x *= x; x -= 0.5; x *= 0.4;
+        oscillatorPosition += oscillatorRate;
+        if ( oscillatorPosition > 1.0 ) oscillatorPosition -= 2.0;
+        ((float*)ioData->mBuffers[0].mData)[i] = x;
+        ((float*)ioData->mBuffers[1].mData)[i] = x;
+    }
     
     return noErr;
 }
