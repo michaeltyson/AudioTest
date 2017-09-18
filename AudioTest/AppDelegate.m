@@ -51,7 +51,10 @@ static AudioStreamBasicDescription kNonInterleavedFloatingPoint = {
 - (void)setupAudioSystem {
     
     NSError *error = nil;
-    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error] ) {
+    if ( ![[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord
+                                           withOptions:AVAudioSessionCategoryOptionMixWithOthers |
+                                                       AVAudioSessionCategoryOptionAllowBluetoothA2DP
+                                                 error:&error] ) {
         NSLog(@"Couldn't set audio session category: %@", error);
     }
     
